@@ -1,0 +1,535 @@
+-- src/cli.lua
+-- CLI command parsing and routing
+
+local Executor = require("core.executor")
+local Logger   = require("core.logger")
+local DB       = require("core.db")
+local FS       = require("core.fs")
+
+local M = {}
+
+local VERSION = "0.1.0"
+
+------------------------------------------------------------------------
+-- Built-in source configuration
+------------------------------------------------------------------------
+local builtin_sources = {
+    docker = {
+        name = "docker",
+        url = "https://download.docker.com/linux/ubuntu",
+        distribution = "noble",
+        component = "stable",
+        key_url = "https://download.docker.com/linux/ubuntu/gpg",
+    },
+    vscode = {
+        name = "vscode",
+        url = "https://packages.microsoft.com/repos/code",
+        distribution = "stable",
+        component = "main",
+        key_url = "https://packages.microsoft.com/keys/microsoft.asc",
+    },
+    nodejs = {
+        name = "nodejs",
+        url = "https://deb.nodesource.com/node_20.x",
+        distribution = "nodistro",
+        component = "main",
+        key_url = "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key",
+    },
+}
+
+local function load_source_config(name)
+    -- Check built-in sources first
+    if builtin_sources[name] then
+        return builtin_sources[name]
+    end
+    -- Then check user custom config (LEM_CONFIG/sources/name.lua)
+    local path = _G.LEM_CONFIG .. "/sources/" .. name .. ".lua"
+    if FS.file_exists(path) then
+        local ok, config = pcall(dofile, path)
+        if ok and type(config) == "table" then
+            return config
+        end
+    end
+    return nil
+end
+
+------------------------------------------------------------------------
+-- Command registry
+------------------------------------------------------------------------
+local commands = {}
+
+function commands.install(args, flags)
+    if #args == 0 then
+        io.stderr:write("Usage: lem install <package1> [package2] ...\n")
+        return
+    end
+
+    local PackageManager = require("package.manager")
+    local manager = flags.manager or "apt"
+
+    for _, pkg_name in ipairs(args) do
+        local pkg = { name = pkg_name, manager = manager }
+
+        io.write("Installing " .. pkg_name .. " ...\n")
+        local ok, err = PackageManager.install(pkg)
+
+        if ok then
+            io.write(pkg_name .. " installed successfully.\n")
+        else
+            io.stderr:write("Failed to install " .. pkg_name .. ": " .. tostring(err) .. "\n")
+        end
+    end
+end
+
+function commands.remove(args, flags)
+    if #args == 0 then
+        io.stderr:write("Usage: lem remove <package1> [package2] ...\n")
+        return
+    end
+
+    local PackageManager = require("package.manager")
+
+    for _, pkg_name in ipairs(args) do
+        -- Look up the manager from DB, or use default
+        local record = DB.get_package(pkg_name)
+        local manager = (record and record.manager) or flags.manager or "apt"
+        local pkg = { name = pkg_name, manager = manager }
+
+        io.write("Removing " .. pkg_name .. " ...\n")
+        local ok, err = PackageManager.remove(pkg)
+
+        if ok then
+            io.write(pkg_name .. " removed successfully.\n")
+        else
+            io.stderr:write("Failed to remove " .. pkg_name .. ": " .. tostring(err) .. "\n")
+        end
+    end
+end
+
+function commands.status(args, flags)
+    if #args > 0 then
+        -- Show status of a specific package
+        for _, pkg_name in ipairs(args) do
+            local record = DB.get_package(pkg_name)
+            if record then
+                io.write(string.format(
+                    "Package: %s\n  Manager : %s\n  Version : %s\n  Status  : %s\n  Installed: %s\n",
+                    record.name, record.manager, record.version or "unknown",
+                    record.status or "unknown", record.install_time or "unknown"
+                ))
+            else
+                io.write(pkg_name .. ": not tracked by LEM\n")
+            end
+        end
+    else
+        -- List all managed packages
+        local packages = DB.list_packages()
+        if #packages == 0 then
+            io.write("No packages managed by LEM.\n")
+            return
+        end
+        io.write(string.format("%-20s %-10s %-15s %s\n", "NAME", "MANAGER", "VERSION", "STATUS"))
+        io.write(string.rep("-", 60) .. "\n")
+        for _, pkg in ipairs(packages) do
+            io.write(string.format("%-20s %-10s %-15s %s\n",
+                pkg.name, pkg.manager or "apt",
+                pkg.version or "unknown", pkg.status or "unknown"))
+        end
+    end
+end
+
+function commands.source(args, flags)
+    local subcmd = args[1]
+    if not subcmd or subcmd == "help" then
+        io.write("Usage: lem source <add|list|remove|update> [options]\n")
+        io.write("\n")
+        io.write("Commands:\n")
+        io.write("  add <name>        Add a repository (uses built-in config)\n")
+        io.write("  list              List managed repositories\n")
+        io.write("  remove <name>     Remove a repository\n")
+        io.write("  update            Run apt update\n")
+        return
+    end
+
+    local Repository = require("source.repository")
+
+    if subcmd == "add" then
+        local name = args[2]
+        if not name then
+            io.stderr:write("Error: repository name required\n")
+            io.stderr:write("Usage: lem source add <name>\n")
+            return
+        end
+        local config = load_source_config(name)
+        if not config then
+            io.stderr:write("Error: unknown repository '" .. name .. "'\n")
+            io.stderr:write("Built-in repositories: docker, vscode, nodejs\n")
+            return
+        end
+        io.write("Adding repository: " .. name .. "\n")
+        local ok, err = Repository.add(config)
+        if ok then
+            io.write("Repository '" .. name .. "' added successfully\n")
+        else
+            io.stderr:write("Error: " .. tostring(err) .. "\n")
+        end
+    elseif subcmd == "list" then
+        local sources = Repository.list()
+        if not sources or #sources == 0 then
+            io.write("No managed repositories\n")
+        else
+            io.write(string.format("%-15s %-45s %-12s %s\n", "NAME", "URL", "DISTRIBUTION", "ADDED"))
+            io.write(string.rep("-", 90) .. "\n")
+            for _, s in ipairs(sources) do
+                io.write(string.format("%-15s %-45s %-12s %s\n",
+                    s.name, s.url or "", s.distribution or "", s.added_time or ""))
+            end
+        end
+    elseif subcmd == "remove" then
+        local name = args[2]
+        if not name then
+            io.stderr:write("Error: repository name required\n")
+            return
+        end
+        io.write("Removing repository: " .. name .. "\n")
+        local ok, err = Repository.remove(name)
+        if ok then
+            io.write("Repository '" .. name .. "' removed\n")
+        else
+            io.stderr:write("Error removing repository: " .. tostring(err) .. "\n")
+        end
+    elseif subcmd == "update" then
+        io.write("Updating package lists...\n")
+        local ok, err = Repository.update()
+        if ok then
+            io.write("Package lists updated\n")
+        else
+            io.stderr:write("Error updating package lists: " .. tostring(err) .. "\n")
+        end
+    else
+        io.stderr:write("Unknown source command: " .. subcmd .. "\n")
+    end
+end
+
+function commands.apply(args, flags)
+    local name = args[1]
+    if not name then
+        print("Usage: lem apply <recipe>")
+        print("")
+        print("Apply a recipe to set up an environment.")
+        print("")
+        print("Available recipes:")
+        -- List built-in recipes
+        local recipe_dir = _G.LEM_ROOT .. "/recipes"
+        local handle = io.popen("ls " .. recipe_dir .. "/*.lua 2>/dev/null")
+        if handle then
+            for line in handle:lines() do
+                local rname = line:match("([^/]+)%.lua$")
+                if rname then
+                    print("  " .. rname)
+                end
+            end
+            handle:close()
+        end
+        return
+    end
+
+    local Recipe = require("recipe.loader")
+    local PkgManager = require("package.manager")
+
+    -- 1. Load recipe
+    print("Loading recipe: " .. name)
+    local recipe, err = Recipe.load(name)
+    if not recipe then
+        print("Error: " .. err)
+        return
+    end
+
+    print("Recipe: " .. recipe.name)
+    if recipe.description then
+        print("Description: " .. recipe.description)
+    end
+    print("")
+
+    -- 2. Check and install missing packages
+    local installed = 0
+    local skipped = 0
+    local failed = 0
+
+    for _, pkg in ipairs(recipe.packages) do
+        local pkg_info = { name = pkg.name, manager = pkg.manager or "apt" }
+
+        -- Check if already installed
+        local is_installed = PkgManager.is_installed(pkg_info)
+        if is_installed then
+            print("  [skip] " .. pkg.name .. " (already installed)")
+            skipped = skipped + 1
+        else
+            print("  [install] " .. pkg.name .. " (" .. pkg_info.manager .. ")")
+            local ok, install_err = PkgManager.install(pkg_info)
+            if ok then
+                installed = installed + 1
+            else
+                print("    Error: " .. (install_err or "unknown error"))
+                failed = failed + 1
+            end
+        end
+    end
+
+    -- 3. Start services (Docker containers)
+    local services_started = 0
+    local services_failed = 0
+
+    if recipe.services and #recipe.services > 0 then
+        local Docker = require("package.docker")
+        print("")
+        print("Starting services...")
+        for _, svc in ipairs(recipe.services) do
+            local opts = {
+                image  = svc.image,
+                port   = svc.port,
+                env    = svc.env,
+                volume = svc.volume,
+            }
+            print("  [service] " .. svc.name .. " (" .. (svc.image or svc.name) .. ")")
+            local ok, svc_err = Docker.install(svc.name, opts)
+            if ok then
+                services_started = services_started + 1
+            else
+                print("    Error: " .. tostring(svc_err))
+                services_failed = services_failed + 1
+            end
+        end
+    end
+
+    -- 4. Output summary
+    print("")
+    print("Summary:")
+    print("  Installed: " .. installed)
+    print("  Skipped:   " .. skipped)
+    print("  Failed:    " .. failed)
+    print("  Total:     " .. #recipe.packages)
+    if recipe.services and #recipe.services > 0 then
+        print("  Services started: " .. services_started)
+        print("  Services failed : " .. services_failed)
+    end
+
+    if failed > 0 or services_failed > 0 then
+        print("")
+        print("Some packages or services failed to install.")
+    else
+        print("")
+        print("Recipe '" .. recipe.name .. "' applied successfully!")
+    end
+
+    -- 处理环境变量
+    if recipe.env and next(recipe.env) then
+        local Variable = require("environment.variable")
+        local ok, err = Variable.generate(recipe.env)
+        if ok then
+            print("")
+            print("Environment variables updated: ~/.config/lem/env.sh")
+            print("Run: source ~/.config/lem/env.sh")
+        end
+    end
+end
+
+function commands.env(args, flags)
+    local Variable = require("environment.variable")
+    if args[1] == "show" or not args[1] then
+        local content, err = Variable.show()
+        if content then
+            print("Current LEM environment variables:")
+            print("")
+            print(content)
+            print("Source this file: source ~/.config/lem/env.sh")
+        else
+            print("No environment configuration found.")
+        end
+    else
+        print("Usage: lem env [show]")
+    end
+end
+
+function commands.backup(args, flags)
+    local EnvManager = require("environment.manager")
+    local configs = (#args > 0) and args or nil
+    EnvManager.backup(configs)
+end
+
+function commands.restore(args, flags)
+    local EnvManager = require("environment.manager")
+    local configs = (#args > 0) and args or nil
+    EnvManager.restore(configs)
+end
+
+function commands.help(args, flags)
+    io.write([[
+LEM - Lua Environment Manager (v]] .. VERSION .. [[)
+
+Usage: lem <command> [options] [arguments]
+
+Commands:
+  install <pkg...>    Install one or more packages
+  remove  <pkg...>    Remove one or more packages
+  status  [pkg...]    Show package status (all or specific)
+  source  <sub>       Manage APT repositories (add|list|remove|update)
+  apply   <recipe>    Apply a recipe to set up an environment
+  env     [show]      Show LEM environment variables
+  backup  [configs]   Backup configuration files
+  restore [configs]   Restore configuration files from backup
+  update  [target]      Update package lists and upgrade (all|system|lem)
+  help                Show this help message
+  version             Show version number
+
+Global Options:
+  --help, -h          Show help
+  --version, -v       Show version
+  --verbose           Enable verbose/debug output
+  --manager=<name>    Specify package manager (default: apt)
+]])
+end
+
+function commands.update(args, flags)
+    local target = args[1] or "all"
+    if target == "all" or target == "system" then
+        print("Updating package lists...")
+        local result = Executor.execute_sudo("apt update")
+        if result.success then
+            print("Package lists updated successfully.")
+        else
+            print("Failed to update package lists.")
+            return
+        end
+        if target == "all" then
+            print("")
+            print("Upgrading installed packages...")
+            local upgrade_result = Executor.execute_sudo("apt upgrade -y")
+            if upgrade_result.success then
+                print("Packages upgraded successfully.")
+            else
+                print("Some packages failed to upgrade.")
+            end
+        end
+    elseif target == "lem" then
+        print("LEM is up to date (version " .. VERSION .. ")")
+    else
+        print("Usage: lem update [all|system|lem]")
+    end
+end
+
+function commands.version(args, flags)
+    io.write("LEM version " .. VERSION .. "\n")
+end
+
+------------------------------------------------------------------------
+-- Argument parser
+------------------------------------------------------------------------
+local function parse_args(arg)
+    local command = nil
+    local positional = {}
+    local flags = {}
+
+    local i = 0
+    while arg[i] ~= nil do i = i - 1 end
+    i = i + 1  -- now arg[i] is the first element (arg[0] is script name)
+
+    -- Skip arg[0] (script path)
+    if arg[0] then
+        i = 1
+    end
+
+    while arg[i] ~= nil do
+        local a = arg[i]
+
+        if a == "--help" or a == "-h" then
+            flags.help = true
+        elseif a == "--version" or a == "-v" then
+            flags.version = true
+        elseif a == "--verbose" then
+            flags.verbose = true
+        elseif a:match("^%-%-") then
+            -- Handle --key=value flags
+            local key, value = a:match("^%-%-([^=]+)=(.*)$")
+            if key then
+                flags[key] = value
+            else
+                -- Boolean flag: --flag-name  →  flags["flag-name"] = true
+                local flag_name = a:match("^%-%-(.+)$")
+                if flag_name then
+                    flags[flag_name] = true
+                end
+            end
+        elseif not command then
+            command = a
+        else
+            positional[#positional + 1] = a
+        end
+
+        i = i + 1
+    end
+
+    return command, positional, flags
+end
+
+------------------------------------------------------------------------
+-- Main entry
+------------------------------------------------------------------------
+function M.run(arg)
+    -- Initialise logger and DB using globals set by main.lua
+    local data_dir = _G.LEM_DATA or "/tmp/lem"
+    local log_level = "INFO"
+
+    -- Parse early to check for --verbose before init
+    local _, _, early_flags = parse_args(arg)
+    if early_flags.verbose then
+        log_level = "DEBUG"
+    end
+
+    Logger.init(data_dir, log_level)
+    DB.init(data_dir)
+
+    local command, args, flags = parse_args(arg)
+
+    -- Handle global flags that short-circuit
+    if flags.help and not command then
+        commands.help(args, flags)
+        return
+    end
+    if flags.version and not command then
+        commands.version(args, flags)
+        return
+    end
+
+    -- Override verbose after full parse
+    if flags.verbose then
+        Logger.set_level("DEBUG")
+    end
+
+    -- Route to command
+    if not command then
+        commands.help(args, flags)
+        return
+    end
+
+    -- If --help was passed alongside a command, show help for that command
+    if flags.help then
+        commands.help(args, flags)
+        return
+    end
+
+    local handler = commands[command]
+    if handler then
+        handler(args, flags)
+    else
+        io.stderr:write("Unknown command: " .. command .. "\n")
+        io.stderr:write("Run 'lem help' for usage.\n")
+        os.exit(1)
+    end
+
+    -- Cleanup
+    DB.close()
+    Logger.close()
+end
+
+return M
