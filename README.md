@@ -8,6 +8,7 @@
 
 - [功能特性](#功能特性)
 - [系统要求](#系统要求)
+- [快速安装](#快速安装)
 - [安装部署](#安装部署)
 - [快速开始](#快速开始)
 - [命令详解](#命令详解)
@@ -40,6 +41,56 @@
 | SQLite3 | 状态数据库（C 模块需要 `libsqlite3-dev`） |
 | GCC | 编译 C 原生模块（可选） |
 | Docker | 使用 Docker 相关功能时需要 |
+
+---
+
+## 快速安装
+
+### 一键安装（推荐）
+
+```bash
+# 下载项目
+git clone https://github.com/your-repo/LEM.git
+cd LEM
+
+# 运行安装脚本（自动安装依赖、编译模块、配置环境）
+bash install.sh
+```
+
+### 自定义安装
+
+```bash
+# 指定安装路径
+bash install.sh --prefix=/opt/lem
+
+# 跳过依赖安装（已有环境时）
+bash install.sh --skip-deps
+
+# 跳过 C 模块编译（无 GCC 时）
+bash install.sh --no-compile
+
+# 强制重新安装
+bash install.sh --force
+```
+
+### 卸载
+
+```bash
+bash install.sh uninstall
+```
+
+### 手动安装
+
+```bash
+# 1. 安装系统依赖
+sudo apt install lua5.4 liblua5.4-dev libsqlite3-dev gcc make
+
+# 2. 编译 C 原生模块（可选）
+cd native && make && cd ..
+
+# 3. 运行初始化
+./lem init
+```
 
 ---
 

@@ -363,6 +363,25 @@ function commands.restore(args, flags)
     EnvManager.restore(configs)
 end
 
+commands.deps = function(args, flags)
+    local Deps = require("core.deps")
+    local subcmd = args[1] or "status"
+    
+    if subcmd == "status" or subcmd == "check" then
+        Deps.report()
+    elseif subcmd == "install" then
+        Deps.install_missing()
+    elseif subcmd == "list" then
+        for _, dep in ipairs(Deps.dependencies) do
+            local type_str = dep.type == "required" and "[required]" or "[optional]"
+            print(string.format("  %-10s %-20s %s", type_str, dep.name, dep.description))
+        end
+    else
+        print("Unknown deps subcommand: " .. subcmd)
+        print("Available: status, install, list")
+    end
+end
+
 function commands.help(args, flags)
     io.write([[
 LEM - Lua Environment Manager (v]] .. VERSION .. [[)
@@ -378,7 +397,20 @@ Commands:
   env     [show]      Show LEM environment variables
   backup  [configs]   Backup configuration files
   restore [configs]   Restore configuration files from backup
-  update  [target]      Update package lists and upgrade (all|system|lem)
+  deps   [status]     Check dependency status
+  deps   install      Install missing dependencies
+  deps   list         List all dependencies
+  update  [target]    Update package lists and upgrade (all|system|lem)
+  init    [--force]   Initialize LEM environment
+  check               Check LEM init state (exit 0=complete, 1=partial, 2=uninitialized)
+  report  [--verbose] Show LEM environment report
+
+Init Options:
+  --force             Force reinitialize even if already done
+  --skip-shell        Skip shell integration (don't modify .bashrc/.zshrc)
+  --skip-db           Skip database initialization
+  --skip-compile      Skip C native module compilation
+  --dry-run           Show what would be done without making changes
   help                Show this help message
   version             Show version number
 
@@ -420,6 +452,45 @@ end
 
 function commands.version(args, flags)
     io.write("LEM version " .. VERSION .. "\n")
+end
+
+function commands.init(args, flags)
+    local Init = require("core.init")
+    local force = flags.force or false
+    local opts = {
+        skip_shell   = flags["skip-shell"] or false,
+        skip_db      = flags["skip-db"] or false,
+        skip_compile = flags["skip-compile"] or false,
+        dry_run      = flags["dry-run"] or false,
+    }
+    Init.initialize(force, opts)
+end
+
+function commands.check(args, flags)
+    local Init = require("core.init")
+    local status = Init.check()
+    
+    if status.init_state == "complete" then
+        io.write("LEM environment: OK\n")
+        os.exit(0)
+    elseif status.init_state == "partial" then
+        io.write("LEM environment: PARTIAL (" .. status.missing_count .. " items missing)\n")
+        for _, item in ipairs(status.missing) do
+            io.write("  - " .. item.name .. "\n")
+        end
+        io.write("Run 'lem init' to fix.\n")
+        os.exit(1)
+    else
+        io.write("LEM environment: NOT INITIALIZED\n")
+        io.write("Run 'lem init' to initialize.\n")
+        os.exit(2)
+    end
+end
+
+function commands.report(args, flags)
+    local Init = require("core.init")
+    local verbose = flags.verbose or false
+    Init.report(verbose)
 end
 
 ------------------------------------------------------------------------
@@ -487,7 +558,6 @@ function M.run(arg)
     end
 
     Logger.init(data_dir, log_level)
-    DB.init(data_dir)
 
     local command, args, flags = parse_args(arg)
 
@@ -516,6 +586,28 @@ function M.run(arg)
     if flags.help then
         commands.help(args, flags)
         return
+    end
+
+    -- Auto-initialization detection (must happen before DB.init)
+    -- If not initialized, Init.initialize() handles DB.init internally.
+    -- For init/help/version commands, skip auto-init check.
+    local auto_initialized = false
+    if command ~= "init" and command ~= "help" and command ~= "version"
+       and command ~= "check" and command ~= "report" then
+        local Init = require("core.init")
+        if not Init.is_initialized() then
+            print("LEM environment not initialized. Running init...")
+            print("")
+            Init.initialize(false, { skip_shell = true })  -- auto-init: skip shell rc modification
+            print("")
+            auto_initialized = true
+        end
+    end
+
+    -- Initialise DB for the current command
+    -- (skip if Init.initialize just ran, as it already set up the DB)
+    if not auto_initialized then
+        DB.init(data_dir)
     end
 
     local handler = commands[command]
