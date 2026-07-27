@@ -371,6 +371,56 @@ lem update --check
 lem update --apply
 ```
 
+### 版本历史与回滚
+
+```bash
+# 查看版本更新历史
+lem update --history
+
+# 回滚到上一版本
+lem update --rollback
+
+# 回滚到指定版本
+lem update --rollback 1.0.0
+
+# 恢复中断的更新
+lem update --resume
+
+# 查看当前更新状态
+lem update --status
+```
+
+### 更新进度显示
+
+更新过程中会显示 7 步进度条：
+1. **CHECK** — 检查远端版本
+2. **DOWNLOAD** — 下载发布包（支持断点续传）
+3. **BACKUP** — 备份当前版本
+4. **EXTRACT** — 解压并安装
+5. **COMPILE** — 重编译 C 模块（源码未变更时自动跳过）
+6. **VERIFY** — 验证更新结果
+7. **COMMIT** — 自动提交变更到 Git 仓库
+
+### 中断恢复
+
+如果更新过程中被中断（Ctrl+C、网络断开等），下次运行 `lem update` 时会自动检测并提供恢复选项：
+- **[R] 恢复** — 从备份还原到更新前版本
+- **[C] 继续** — 从中断步骤继续更新
+- **[S] 跳过** — 清除中断状态
+
+### 更新配置
+
+在 `config/lem.lua` 中可配置更新行为：
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `backup_retention` | 3 | 保留最近 N 个备份 |
+| `backup_max_age` | 30 | 超过 N 天的备份自动清理 |
+| `resume_download` | true | 启用断点续传 |
+| `skip_unchanged_compile` | true | 源码未变更时跳过编译 |
+| `download_timeout` | 600 | 下载超时（秒） |
+| `auto_commit` | true | 更新成功后自动 git commit + push |
+
 ### `lem init` — 初始化环境
 
 初始化 LEM 运行环境，包括数据库、Shell 集成和 C 模块编译。
@@ -647,7 +697,10 @@ LEM/
 │   │   ├── deps.lua             # 依赖自管理
 │   │   ├── scanner.lua          # 系统扫描模块
 │   │   ├── takeover.lua         # 环境接管模块
-│   │   └── updater.lua          # 自动更新模块
+│   │   ├── updater.lua          # 自动更新模块
+│   │   ├── progress.lua         # 进度条与 ETA
+│   │   ├── resume.lua           # 断点续传与下载加速
+│   │   └── snapshot.lua         # 备份快照与中断恢复
 │   ├── package/
 │   │   ├── init.lua             # 包模块入口
 │   │   ├── manager.lua          # 包管理抽象层
@@ -663,6 +716,8 @@ LEM/
 │   │   └── systemd.lua          # Systemd 服务管理
 │   └── recipe/
 │       └── loader.lua           # Recipe 加载器
+├── docs/
+│   └── update-spec.md           # 更新机制技术规格
 ├── native/                      # C 原生模块
 │   ├── lem_common.h             # 公共头文件
 │   ├── lem_executor.c           # 执行器 C 实现
@@ -709,6 +764,13 @@ lem update --apply
 ```
 
 更新过程中用户配置（`~/.config/lem/`）和状态数据库（`~/.local/share/lem/state.db`）不会被覆盖。
+
+### 自动提交
+
+更新成功后，LEM 会自动将变更提交到 Git 仓库并推送到远程（如果项目是 Git 仓库）。
+提交信息格式：`chore: auto-update to vX.Y.Z`
+
+如果不在 Git 仓库中或推送失败，更新仍然成功完成。可通过配置 `auto_commit = false` 禁用此功能。
 
 ---
 

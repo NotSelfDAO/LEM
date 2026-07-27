@@ -404,6 +404,10 @@ Commands:
   lem update               Check for available updates
   lem update --check       Check version only
   lem update --apply       Download and apply update
+  lem update --history     Show update history
+  lem update --rollback [version]  Rollback to a previous version
+  lem update --resume      Resume interrupted update
+  lem update --status      Show current update status
   init    [--force]   Initialize LEM environment
   check               Check LEM init state (exit 0=complete, 1=partial, 2=uninitialized)
   report  [--verbose] Show LEM environment report
@@ -435,6 +439,55 @@ function commands.update(args, flags)
     -- Handle --check and --apply flags for LEM self-update
     local check_only = flags["check"] or false
     local apply_flag = flags["apply"] or false
+
+    -- --history: 显示版本历史
+    if flags["history"] then
+        local Updater = require("core.updater")
+        Updater.show_history()
+        return
+    end
+
+    -- --rollback [version]: 回滚
+    if flags["rollback"] then
+        local Updater = require("core.updater")
+        local target_ver = args[1]  -- 可选的版本号参数
+        if target_ver then
+            Updater.rollback(target_ver)
+        else
+            -- 无参数时显示最近版本让用户选择
+            local history = require("core.db").list_version_history(5)
+            if not history or #history == 0 then
+                print("No version history available for rollback.")
+                return
+            end
+            print("Available versions for rollback:")
+            for i, entry in ipairs(history) do
+                print(string.format("  %d) v%s (%s)", i, entry.version, entry.installed_at or ""))
+            end
+            io.write("Select version number: ")
+            local choice = io.read("*n")
+            if choice and history[choice] then
+                Updater.rollback(history[choice].version)
+            else
+                print("Invalid selection.")
+            end
+        end
+        return
+    end
+
+    -- --resume: 恢复中断的更新
+    if flags["resume"] then
+        local Updater = require("core.updater")
+        Updater.resume_update()
+        return
+    end
+
+    -- --status: 显示更新状态
+    if flags["status"] then
+        local Updater = require("core.updater")
+        Updater.show_status()
+        return
+    end
 
     if check_only or apply_flag or target == "lem" then
         local Updater = require("core.updater")
