@@ -8,7 +8,7 @@ local FS       = require("core.fs")
 
 local M = {}
 
-local VERSION = "0.1.0"
+local VERSION = "1.0.0"
 
 ------------------------------------------------------------------------
 -- Built-in source configuration
@@ -401,9 +401,16 @@ Commands:
   deps   install      Install missing dependencies
   deps   list         List all dependencies
   update  [target]    Update package lists and upgrade (all|system|lem)
+  lem update               Check for available updates
+  lem update --check       Check version only
+  lem update --apply       Download and apply update
   init    [--force]   Initialize LEM environment
   check               Check LEM init state (exit 0=complete, 1=partial, 2=uninitialized)
   report  [--verbose] Show LEM environment report
+  scan                Scan system packages (requires system_takeover=true)
+  scan --import       Import scanned packages into LEM
+  scan --dry-run      Scan without making changes
+  scan --import --mode=symlink|reinstall  Choose takeover mode
 
 Init Options:
   --force             Force reinitialize even if already done
@@ -424,6 +431,61 @@ end
 
 function commands.update(args, flags)
     local target = args[1] or "all"
+
+    -- Handle --check and --apply flags for LEM self-update
+    local check_only = flags["check"] or false
+    local apply_flag = flags["apply"] or false
+
+    if check_only or apply_flag or target == "lem" then
+        local Updater = require("core.updater")
+
+        if check_only or (not apply_flag and target == "lem") then
+            -- Check version only
+            print("Checking for updates...")
+            local info, err = Updater.has_update()
+            if info then
+                Updater.print_version_info(info)
+            else
+                print("Unable to check for updates. Check your network connection.")
+                if err then Logger.warn("update check error: " .. err) end
+            end
+            return
+        end
+
+        if apply_flag then
+            -- Perform update
+            print("Checking for updates...")
+            local info, err = Updater.has_update()
+            if not info then
+                print("Unable to check for updates.")
+                if err then Logger.warn("update check error: " .. err) end
+                return
+            end
+
+            if not info.has_update then
+                print(string.format("Already up to date (v%s).", info.current))
+                return
+            end
+
+            print(string.format("New version available: v%s -> v%s", info.current, info.latest))
+            io.write("Update? [y/N] ")
+            local answer = io.read("*l")
+            if answer ~= "y" and answer ~= "Y" then
+                print("Cancelled.")
+                return
+            end
+
+            local ok, update_err = Updater.apply_update()
+            if ok then
+                print("Update complete.")
+            else
+                print("Update failed: " .. tostring(update_err))
+            end
+        end
+        return
+    end
+
+    -- Original behaviour for all / system targets
     if target == "all" or target == "system" then
         print("Updating package lists...")
         local result = Executor.execute_sudo("apt update")
@@ -443,10 +505,10 @@ function commands.update(args, flags)
                 print("Some packages failed to upgrade.")
             end
         end
-    elseif target == "lem" then
-        print("LEM is up to date (version " .. VERSION .. ")")
     else
         print("Usage: lem update [all|system|lem]")
+        print("       lem update --check       Check for LEM updates")
+        print("       lem update --apply       Download and apply LEM update")
     end
 end
 
@@ -491,6 +553,96 @@ function commands.report(args, flags)
     local Init = require("core.init")
     local verbose = flags.verbose or false
     Init.report(verbose)
+end
+
+commands.scan = function(args, flags)
+    -- 检查 system_takeover 配置是否开启
+    local config_path = (_G.LEM_ROOT or ".") .. "/config/lem.lua"
+    local config = {}
+    if io.open(config_path) then
+        local ok, cfg = pcall(dofile, config_path)
+        if ok then config = cfg end
+    end
+
+    if not config.system_takeover then
+        print("System takeover is disabled.")
+        print("Enable it in config/lem.lua: system_takeover = true")
+        return
+    end
+
+    local Scanner = require("core.scanner")
+    local Takeover = require("core.takeover")
+
+    -- 解析 flags
+    local do_import = flags["import"] or false
+    local dry_run = flags["dry-run"] or false
+    local mode = flags["mode"] or "symlink"  -- default mode
+
+    -- 执行扫描
+    print("Scanning system environment...")
+    print("")
+    local results = Scanner.scan_all()
+    Scanner.print_report(results)
+
+    if dry_run then
+        print("")
+        print("[Dry run] No changes made.")
+        return
+    end
+
+    if not do_import then
+        return
+    end
+
+    -- 导入确认
+    local total = results.summary.dpkg_count + results.summary.docker_count
+    print("")
+    print(string.format("Found %d packages to import.", total))
+    io.write("Continue? [y/N] ")
+    local answer = io.read("*l")
+    if answer ~= "y" and answer ~= "Y" then
+        print("Cancelled.")
+        return
+    end
+
+    -- 执行导入
+    print("")
+    print(string.format("Importing with mode: %s", mode))
+
+    if mode == "symlink" then
+        -- 构建 package_list 用于 symlink 模式
+        local pkg_list = {}
+        for _, pkg in ipairs(results.dpkg_packages or {}) do
+            if pkg.status == "install" then
+                -- 查找二进制路径
+                local which_result = Executor.execute("which " .. pkg.name)
+                local path = which_result.success and which_result.stdout:match("(%S+)") or nil
+                if path then
+                    table.insert(pkg_list, {name=pkg.name, path=path, version="system"})
+                end
+            end
+        end
+        for _, bin in ipairs(results.binaries or {}) do
+            table.insert(pkg_list, {name=bin.name, path=bin.path, version=bin.version or "system"})
+        end
+
+        local takeover_results = Takeover.symlink_takeover(pkg_list)
+        Takeover.print_report(takeover_results, "symlink")
+    elseif mode == "reinstall" then
+        -- 构建 package_list 用于 reinstall 模式
+        local pkg_list = {}
+        for _, pkg in ipairs(results.dpkg_packages or {}) do
+            if pkg.status == "install" then
+                table.insert(pkg_list, {name=pkg.name, manager="apt", version="system"})
+            end
+        end
+        for _, container in ipairs(results.docker_containers or {}) do
+            table.insert(pkg_list, {name=container.name, manager="docker", version=container.image})
+        end
+
+        local takeover_results = Takeover.reinstall_takeover(pkg_list)
+        Takeover.print_report(takeover_results, "reinstall")
+    end
 end
 
 ------------------------------------------------------------------------

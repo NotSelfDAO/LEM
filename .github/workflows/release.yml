@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create release archive
+        run: |
+          mkdir -p lem-${{ steps.version.outputs.VERSION }}
+          cp -r src native recipes config install.sh lem README.md CHANGELOG.md lem-${{ steps.version.outputs.VERSION }}/
+          tar -czf lem-v${{ steps.version.outputs.VERSION }}.tar.gz lem-${{ steps.version.outputs.VERSION }}
+
+      - name: Generate Release Notes
+        id: notes
+        run: |
+          echo "## LEM v${{ steps.version.outputs.VERSION }}" > release_notes.md
+          echo "" >> release_notes.md
+          # Get changelog section for this version
+          if [ -f CHANGELOG.md ]; then
+            sed -n "/## \[v${{ steps.version.outputs.VERSION }}\]/,/^## \[/p" CHANGELOG.md | head -n -1 >> release_notes.md
+          fi
+          echo "" >> release_notes.md
+          echo "### Full Changelog: https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md" >> release_notes.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: lem-v${{ steps.version.outputs.VERSION }}.tar.gz
+          body_path: release_notes.md
+          draft: false
+          prerelease: false

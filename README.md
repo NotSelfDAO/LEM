@@ -1,4 +1,4 @@
-# LEM — Linux Environment Manager
+# LEM v1.0 — Linux Environment Manager
 
 **LEM** (Lua Environment Manager) 是一个基于 Lua 5.4 + C 的轻量级 Linux 环境管理工具。它通过统一的 CLI 界面，整合软件安装、软件源管理、环境变量配置、服务部署和环境配方等功能，让你快速搭建和管理 Linux 开发/服务器环境。
 
@@ -15,17 +15,24 @@
 - [Recipe 配方系统](#recipe-配方系统)
 - [配置说明](#配置说明)
 - [C 原生模块编译](#c-原生模块编译)
+- [项目结构](#项目结构)
+- [GitHub Release 发布](#github-release-发布)
 - [常见问题](#常见问题)
 
 ---
 
 ## 功能特性
 
-- **统一包管理** — 同时支持 APT 和 Docker 后端，一条命令管理软件包
-- **软件源管理** — 内置 Docker、VS Code、Node.js 等常用源，一键添加
-- **声明式 Recipe** — 通过 Lua 脚本定义环境配方，一键部署完整开发环境
+- **包管理（APT + Docker 双后端）** — 统一命令管理软件包，自动切换 APT 和 Docker 后端
+- **软件源管理（GPG 密钥 + 仓库管理）** — 内置 Docker、VS Code、Node.js 等常用源，自动处理 GPG 密钥
+- **声明式 Recipe 系统** — 通过 Lua 脚本定义环境配方，一键部署完整开发环境
 - **环境变量管理** — 集中管理环境变量，支持生成和加载
+- **服务管理（Systemd + Docker）** — 支持 Systemd 系统服务和 Docker 容器服务
 - **配置备份/恢复** — 快速备份和恢复系统配置文件
+- **环境自动初始化（lem init）** — 首次运行自动检测并初始化环境，零配置启动
+- **依赖自管理（lem deps）** — 自动检测、报告和安装 LEM 运行所需的系统依赖
+- **系统扫描与环境接管（lem scan）** — 扫描系统已安装软件包，一键导入 LEM 管理
+- **一键安装脚本** — `install.sh` 自动完成依赖安装、C 模块编译、环境配置
 - **SQLite 状态追踪** — 记录所有已安装软件的状态信息
 - **安全机制** — 命令白名单 + 参数消毒，防止危险操作
 - **C 原生加速** — 可选的 C 原生模块，自动 fallback 到纯 Lua 实现
@@ -96,6 +103,13 @@ cd native && make && cd ..
 
 ## 安装部署
 
+### 远程安装（推荐）
+
+```bash
+# 一键远程安装
+curl -sL https://github.com/AAA-Software-Wholesaler/LEM/releases/latest/download/install.sh | bash
+```
+
 ### 1. 安装依赖
 
 ```bash
@@ -161,11 +175,19 @@ lem apply cpp
 
 # 查看环境变量
 lem env
+
+# 检查依赖状态
+lem deps status
+
+# 检查初始化状态
+lem check
 ```
 
 ---
 
 ## 命令详解
+
+LEM v1.0 共提供 **16 个命令**：
 
 ### `lem install` — 安装软件包
 
@@ -304,6 +326,22 @@ lem restore /etc/nginx/nginx.conf
 lem restore
 ```
 
+### `lem deps` — 依赖管理
+
+检查和管理 LEM 运行所需系统依赖。
+
+```bash
+# 查看依赖状态报告
+lem deps status
+lem deps check
+
+# 安装缺失的依赖
+lem deps install
+
+# 列出所有依赖
+lem deps list
+```
+
 ### `lem update` — 更新系统
 
 更新软件包列表并升级已安装的软件。
@@ -319,6 +357,87 @@ lem update system
 # 检查 LEM 自身更新
 lem update lem
 ```
+
+### 检查与更新
+
+```bash
+# 检查是否有新版本
+lem update
+
+# 仅检查版本
+lem update --check
+
+# 下载并应用更新
+lem update --apply
+```
+
+### `lem init` — 初始化环境
+
+初始化 LEM 运行环境，包括数据库、Shell 集成和 C 模块编译。
+
+```bash
+# 标准初始化
+lem init
+
+# 强制重新初始化
+lem init --force
+
+# 跳过特定步骤
+lem init --skip-shell
+lem init --skip-db
+lem init --skip-compile
+
+# 预览模式（不实际操作）
+lem init --dry-run
+```
+
+### `lem check` — 检查初始化状态
+
+检查 LEM 环境是否已正确初始化。退出码：0=完成，1=部分，2=未初始化。
+
+```bash
+lem check
+```
+
+### `lem report` — 环境报告
+
+显示 LEM 环境详细报告。
+
+```bash
+# 标准报告
+lem report
+
+# 详细报告
+lem report --verbose
+```
+
+### `lem scan` — 系统扫描与环境接管
+
+扫描系统中已安装的软件包，并可选择导入到 LEM 进行管理。需要在配置中启用 `system_takeover = true`。
+
+```bash
+# 扫描系统环境（仅显示，不导入）
+lem scan
+
+# 扫描并导入到 LEM
+lem scan --import
+
+# 预览模式（不实际操作）
+lem scan --dry-run
+
+# 使用 reinstall 模式导入
+lem scan --import --mode=reinstall
+
+# 使用 symlink 模式导入（默认）
+lem scan --import --mode=symlink
+```
+
+**接管模式说明：**
+
+| 模式 | 说明 |
+|------|------|
+| `symlink` | 在 LEM bin 目录创建软链接，指向系统已安装的二进制文件 |
+| `reinstall` | 通过 LEM 包管理后端重新安装，完全接管 |
 
 ### `lem help` — 帮助信息
 
@@ -367,6 +486,7 @@ Recipe 是 LEM 的核心功能之一，通过 Lua 脚本声明式定义环境配
 
 ```
 build-essential, clang, cmake, ninja-build, gdb, git
+环境变量: CC=clang, CXX=clang++
 ```
 
 #### `dev` — 通用开发工具
@@ -384,7 +504,7 @@ docker.io, docker-compose
 #### `server` — 服务器环境
 
 ```
-docker.io + MySQL 8 容器 + Redis 7 容器
+docker.io + MySQL 8 容器 (3306) + Redis 7 容器 (6379)
 ```
 
 ### 自定义 Recipe
@@ -446,6 +566,9 @@ return {
 
     -- 命令超时时间（秒）
     timeout = 300,
+
+    -- 系统接管（扫描并导入系统已安装软件包）
+    system_takeover = false,
 }
 ```
 
@@ -496,7 +619,96 @@ make clean    # 清理编译产物
 - Lua 5.4 开发头文件（`lua5.4` 或 `liblua5.4-dev`）
 - SQLite3 开发库（`libsqlite3-dev`，仅 `lem_db.so` 需要）
 
-> 编译完成后，`.so` 文件会放在 `native/` 目录下。LEM 启动时会自动检测并加载，未找到的模块会自动 fallback 到纯 Lua 实现。
+> 编译完成后，`.so` 文件须放在 `native/` 目录下。LEM 启动时会自动检测并加载，未找到的模块会自动 fallback 到纯 Lua 实现。
+
+---
+
+## 项目结构
+
+```
+LEM/
+├── .github/
+│   └── workflows/
+│       └── release.yml            # GitHub Actions 发布工作流
+├── CHANGELOG.md                   # 变更日志
+├── lem                          # 入口脚本（Bash）
+├── install.sh                   # 一键安装脚本
+├── config/
+│   └── lem.lua                  # 全局配置
+├── src/
+│   ├── main.lua                 # 主入口，路径初始化
+│   ├── cli.lua                  # CLI 命令路由（16 个命令）
+│   ├── core/
+│   │   ├── init.lua             # 环境初始化与自动检测
+│   │   ├── executor.lua         # 命令执行引擎
+│   │   ├── logger.lua           # 日志系统
+│   │   ├── fs.lua               # 文件系统操作
+│   │   ├── db.lua               # SQLite 状态数据库
+│   │   ├── deps.lua             # 依赖自管理
+│   │   ├── scanner.lua          # 系统扫描模块
+│   │   ├── takeover.lua         # 环境接管模块
+│   │   └── updater.lua          # 自动更新模块
+│   ├── package/
+│   │   ├── init.lua             # 包模块入口
+│   │   ├── manager.lua          # 包管理抽象层
+│   │   ├── apt.lua              # APT 后端
+│   │   └── docker.lua           # Docker 后端
+│   ├── source/
+│   │   ├── repository.lua       # 软件源管理
+│   │   └── keyring.lua          # GPG 密钥管理
+│   ├── environment/
+│   │   ├── variable.lua         # 环境变量管理
+│   │   └── manager.lua          # 配置备份/恢复
+│   ├── service/
+│   │   └── systemd.lua          # Systemd 服务管理
+│   └── recipe/
+│       └── loader.lua           # Recipe 加载器
+├── native/                      # C 原生模块
+│   ├── lem_common.h             # 公共头文件
+│   ├── lem_executor.c           # 执行器 C 实现
+│   ├── lem_db.c                 # 数据库 C 实现
+│   ├── lem_fs.c                 # 文件系统 C 实现
+│   └── Makefile                 # 编译脚本
+├── recipes/                     # 内置环境配方
+│   ├── cpp.lua                  # C++ 开发环境
+│   ├── dev.lua                  # 通用开发工具
+│   ├── docker.lua               # Docker 环境
+│   └── server.lua               # 服务器环境
+└── tests/
+    └── test_runner.lua          # 测试框架
+```
+
+---
+
+## GitHub Release 发布
+
+### 自动发布
+
+推送 `v*` 标签时，GitHub Actions 自动触发构建和发布：
+
+```bash
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+工作流将自动：
+- 打包项目文件为 `lem-vX.Y.Z.tar.gz`
+- 从 CHANGELOG.md 生成 Release Notes
+- 创建 GitHub Release 并上传发布包
+
+### 版本更新
+
+LEM 支持自动检查和更新：
+
+```bash
+# 检查最新版本
+lem update
+
+# 自动更新（备份当前版本 → 下载 → 覆盖 → 重新编译）
+lem update --apply
+```
+
+更新过程中用户配置（`~/.config/lem/`）和状态数据库（`~/.local/share/lem/state.db`）不会被覆盖。
 
 ---
 
@@ -545,47 +757,16 @@ lem status
 
 配置备份存放在 `~/.local/share/lem/backups/` 目录下。
 
----
+### Q: `lem init` 做了什么？
 
-## 项目结构
+`lem init` 会执行以下操作：
+1. 创建必要的目录结构（数据目录、配置目录、缓存目录）
+2. 初始化 SQLite 状态数据库
+3. 检测并编译 C 原生模块
+4. 配置 Shell 集成（将 LEM 路径加入 `.bashrc`/`.zshrc`）
+5. 生成默认环境变量文件
 
-```
-lem/
-├── lem                          # 入口脚本（Bash）
-├── src/
-│   ├── main.lua                 # 主入口，路径初始化
-│   ├── cli.lua                  # CLI 命令路由（14 个命令）
-│   ├── core/
-│   │   ├── executor.lua         # 命令执行引擎
-│   │   ├── logger.lua           # 日志系统
-│   │   ├── fs.lua               # 文件系统操作
-│   │   └── db.lua               # SQLite 状态数据库
-│   ├── package/
-│   │   ├── manager.lua          # 包管理抽象层
-│   │   ├── apt.lua              # APT 后端
-│   │   └── docker.lua           # Docker 后端
-│   ├── source/
-│   │   ├── repository.lua       # 软件源管理
-│   │   └── keyring.lua          # GPG 密钥管理
-│   ├── environment/
-│   │   ├── variable.lua         # 环境变量管理
-│   │   └── manager.lua          # 配置备份/恢复
-│   ├── service/
-│   │   └── systemd.lua          # Systemd 服务管理
-│   └── recipe/
-│       └── loader.lua           # Recipe 加载器
-├── native/                      # C 原生模块
-│   ├── lem_executor.c
-│   ├── lem_db.c
-│   ├── lem_fs.c
-│   ├── lem_common.h
-│   └── Makefile
-├── recipes/                     # 内置环境配方
-├── config/
-│   └── lem.lua                  # 全局配置
-└── tests/
-    └── test_runner.lua          # 测试框架
-```
+首次运行任何 LEM 命令时会自动触发初始化。
 
 ---
 

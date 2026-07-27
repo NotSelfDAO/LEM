@@ -220,6 +220,31 @@ function M.list_packages()
     end
 end
 
+--- Batch import package records.
+-- @param packages table  array of {name, manager, version}
+-- @return number  count of successfully imported packages
+function M.import_package(packages)
+    if not packages or #packages == 0 then
+        return 0
+    end
+
+    local count = 0
+    for _, pkg in ipairs(packages) do
+        local ok, err = pcall(function()
+            M.add_package(
+                pkg.name,
+                pkg.manager or "apt",
+                pkg.version or "system"
+            )
+        end)
+        if ok then
+            count = count + 1
+        end
+    end
+
+    return count
+end
+
 ------------------------------------------------------------------------
 -- Sources
 ------------------------------------------------------------------------

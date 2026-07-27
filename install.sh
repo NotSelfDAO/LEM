@@ -13,7 +13,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-LEM_VERSION="0.1.0"
+LEM_VERSION="1.0.0"
+# GitHub repository for remote installation and updates
+LEM_GITHUB_REPO="AAA-Software-Wholesaler/LEM"
+LEM_GITHUB_URL="https://github.com/${LEM_GITHUB_REPO}"
 LEM_PREFIX="$HOME/.local"
 LEM_INSTALL_DIR=""
 LEM_BIN_DIR=""
@@ -69,6 +72,30 @@ info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 step()  { echo -e "\n${BLUE}==>${NC} $1"; }
+
+# Remote installation from GitHub Release
+remote_install() {
+    step "Downloading LEM from GitHub..."
+
+    local TEMP_DIR=$(mktemp -d)
+    local DOWNLOAD_URL="${LEM_GITHUB_URL}/releases/latest/download/install.sh"
+
+    # Download latest release
+    if command -v curl &>/dev/null; then
+        curl -sL "$DOWNLOAD_URL" -o "$TEMP_DIR/install.sh" || {
+            error "Failed to download from GitHub. Check your network."
+        }
+    elif command -v wget &>/dev/null; then
+        wget -q "$DOWNLOAD_URL" -O "$TEMP_DIR/install.sh" || {
+            error "Failed to download from GitHub. Check your network."
+        }
+    else
+        error "Neither curl nor wget found. Install one and try again."
+    fi
+
+    info "Downloaded latest installer."
+    bash "$TEMP_DIR/install.sh"
+}
 
 # Check if running on Linux
 check_os() {
@@ -560,6 +587,14 @@ uninstall() {
 
 # Main
 main() {
+    # Detect if running from remote (piped from curl)
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    if [ -z "$SCRIPT_DIR" ] || [ ! -f "$SCRIPT_DIR/src/main.lua" ]; then
+        # Running remotely, download full release first
+        remote_install
+        exit $?
+    fi
+
     echo ""
     echo "  _     ___  ___  __  __"
     echo " | |   / _ \/ __||  \/  |"

@@ -13,4 +13,7 @@ return {
 
     -- Timeout in seconds
     timeout = 300,
+
+    -- System takeover (scan and import existing system packages)
+    system_takeover = false,
 }
