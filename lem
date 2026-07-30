@@ -1,2 +1,18 @@
 #!/bin/bash
-exec lua "$(dirname "$0")/src/main.lua" "$@"
+
+# Find Lua interpreter (support 5.1-5.4 and LuaJIT)
+LUA=""
+for candidate in lua5.4 lua5.3 lua5.2 lua5.1 lua luajit; do
+    if command -v "$candidate" &>/dev/null; then
+        LUA="$candidate"
+        break
+    fi
+done
+
+if [ -z "$LUA" ]; then
+    echo "Error: No Lua interpreter found."
+    echo "Install one of: lua5.4, lua5.3, lua5.2, lua5.1, or luajit"
+    exit 1
+fi
+
+exec "$LUA" "$(dirname "$0")/src/main.lua" "$@"

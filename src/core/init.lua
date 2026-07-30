@@ -212,9 +212,25 @@ return {
             if FS.file_exists(makefile) then
                 -- Check for gcc (not in executor whitelist, use shell directly)
                 if shell_ok("which gcc") then
-                    -- Check for lua5.4 dev headers
-                    local lua_ok = shell_ok("pkg-config --exists lua5.4") or
-                                   shell_ok("pkg-config --exists lua")
+                    -- Find an available Lua interpreter (multi-version support)
+                    local lua_cmd = nil
+                    for _, candidate in ipairs({"lua5.4", "lua5.3", "lua5.2", "lua5.1", "lua", "luajit"}) do
+                        if shell_ok("which " .. candidate) then
+                            lua_cmd = candidate
+                            break
+                        end
+                    end
+
+                    -- Check for Lua dev headers (any supported version)
+                    local lua_ok = false
+                    local lua_version = nil
+                    for _, ver in ipairs({"lua5.4", "lua5.3", "lua5.2", "lua5.1", "lua"}) do
+                        if shell_ok("pkg-config --exists " .. ver) then
+                            lua_ok = true
+                            lua_version = ver
+                            break
+                        end
+                    end
                     if lua_ok then
                         if dry then
                             print("  [dry-run] make -C " .. lem_root .. "/native")
@@ -222,13 +238,13 @@ return {
                             print("  Compiling native modules...")
                             local make_ok = shell_ok("make -C " .. lem_root .. "/native")
                             if make_ok then
-                                print("  Native modules compiled successfully.")
+                                print("  Native modules compiled successfully (using " .. lua_version .. ").")
                             else
                                 print("  Warning: compilation failed, using Lua fallback.")
                             end
                         end
                     else
-                        print("  Skipped: lua5.4 dev headers not found (install liblua5.4-dev)")
+                        print("  Skipped: Lua dev headers not found (install liblua5.4-dev or equivalent)")
                     end
                 else
                     print("  Skipped: gcc not found")

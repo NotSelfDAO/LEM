@@ -20,7 +20,7 @@ local M = {}
 M.github_repo = "AAA-Software-Wholesaler/LEM"
 
 -- Fallback version (used when DB has no version history)
-M._fallback_version = "1.0.0"
+M._fallback_version = "1.2.0"
 
 ------------------------------------------------------------------------
 -- Internal helpers

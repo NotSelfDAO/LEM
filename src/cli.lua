@@ -8,7 +8,7 @@ local FS       = require("core.fs")
 
 local M = {}
 
-local VERSION = "1.0.0"
+local VERSION = "1.2.0"
 
 ------------------------------------------------------------------------
 -- Built-in source configuration

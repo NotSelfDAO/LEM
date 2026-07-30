@@ -2,6 +2,22 @@
 
 All notable changes to LEM (Linux Environment Manager) are documented in this file.
 
+## [v1.2.0] - 2026-07-30
+
+### Changed
+- **多 Lua 版本支持** — 从仅支持 Lua 5.4 扩展到支持 Lua 5.1/5.2/5.3/5.4 及 LuaJIT
+  - `lem` 启动器按优先级自动检测可用 Lua 解释器
+  - `install.sh` 安装时按版本优先级自动选择可用 Lua
+  - C 原生模块编译自动检测 Lua 头文件和编译参数
+  - `native/lem_common.h` 新增 Lua 5.1/5.2/LuaJIT 兼容宏
+  - `native/Makefile` 支持多版本 Lua 自动检测
+- `src/core/deps.lua` 依赖项从 `lua5.4` 改为通用 `lua`
+- `src/core/init.lua` 初始化时支持多版本 Lua 检测
+
+### Added
+- LuaJIT 兼容性支持（`luaL_setfuncs` 兼容实现）
+- `native/Makefile` 新增 `info` target 显示检测到的 Lua 版本
+
 ## [v1.1.0] - 2026-07-27
 
 ### Added

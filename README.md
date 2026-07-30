@@ -1,6 +1,6 @@
-# LEM v1.0 — Linux Environment Manager
+# LEM v1.2 — Linux Environment Manager
 
-**LEM** (Lua Environment Manager) 是一个基于 Lua 5.4 + C 的轻量级 Linux 环境管理工具。它通过统一的 CLI 界面，整合软件安装、软件源管理、环境变量配置、服务部署和环境配方等功能，让你快速搭建和管理 Linux 开发/服务器环境。
+**LEM** (Lua Environment Manager) 是一个基于 Lua 5.1+ (支持 5.1/5.2/5.3/5.4 及 LuaJIT) + C 的轻量级 Linux 环境管理工具。它通过统一的 CLI 界面，整合软件安装、软件源管理、环境变量配置、服务部署和环境配方等功能，让你快速搭建和管理 Linux 开发/服务器环境。
 
 ---
 
@@ -44,7 +44,7 @@
 | 依赖 | 说明 |
 |------|------|
 | Linux | 基于 Debian/Ubuntu 的发行版（使用 APT） |
-| Lua 5.4 | 运行环境 |
+| Lua 5.1+ | 运行环境（lua5.4/lua5.3/lua5.2/lua5.1/luajit 均可） |
 | SQLite3 | 状态数据库（C 模块需要 `libsqlite3-dev`） |
 | GCC | 编译 C 原生模块（可选） |
 | Docker | 使用 Docker 相关功能时需要 |
@@ -91,6 +91,7 @@ bash install.sh uninstall
 ```bash
 # 1. 安装系统依赖
 sudo apt install lua5.4 liblua5.4-dev libsqlite3-dev gcc make
+# 也支持: lua5.3/lua5.2/lua5.1/luajit
 
 # 2. 编译 C 原生模块（可选）
 cd native && make && cd ..
@@ -115,6 +116,7 @@ curl -sL https://github.com/AAA-Software-Wholesaler/LEM/releases/latest/download
 ```bash
 sudo apt update
 sudo apt install lua5.4 libsqlite3-dev gcc pkg-config
+# 也支持: lua5.3/lua5.2/lua5.1/luajit
 ```
 
 ### 2. 获取 LEM
@@ -187,7 +189,7 @@ lem check
 
 ## 命令详解
 
-LEM v1.0 共提供 **16 个命令**：
+LEM v1.2 共提供 **16 个命令**：
 
 ### `lem install` — 安装软件包
 
@@ -666,7 +668,7 @@ make clean    # 清理编译产物
 ### 编译依赖
 
 - GCC
-- Lua 5.4 开发头文件（`lua5.4` 或 `liblua5.4-dev`）
+- Lua 5.1+ 开发头文件（`lua5.4`/`lua5.3`/`lua5.2`/`lua5.1`/`luajit` 均可，如 `liblua5.4-dev`）
 - SQLite3 开发库（`libsqlite3-dev`，仅 `lem_db.so` 需要）
 
 > 编译完成后，`.so` 文件须放在 `native/` 目录下。LEM 启动时会自动检测并加载，未找到的模块会自动 fallback 到纯 Lua 实现。

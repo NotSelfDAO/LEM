@@ -13,7 +13,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-LEM_VERSION="1.0.0"
+LEM_VERSION="1.2.0"
 # GitHub repository for remote installation and updates
 LEM_GITHUB_REPO="AAA-Software-Wholesaler/LEM"
 LEM_GITHUB_URL="https://github.com/${LEM_GITHUB_REPO}"
@@ -25,6 +25,7 @@ FORCE=false
 SKIP_DEPS=false
 NO_COMPILE=false
 ACTION="install"
+LUA_VER=""
 
 show_help() {
     echo "Usage: bash install.sh [options]"
@@ -151,13 +152,55 @@ detect_package_manager() {
     info "Package manager: $PKG_MANAGER"
 }
 
+# Install Lua (try versions in priority order)
+install_lua() {
+    local lua_installed=false
+
+    case "$PKG_MANAGER" in
+        apt)
+            for ver in 5.4 5.3 5.2 5.1; do
+                if $PKG_INSTALL "lua${ver}" 2>/dev/null; then
+                    info "Installed Lua ${ver}"
+                    lua_installed=true
+                    LUA_VER="$ver"
+                    break
+                fi
+            done
+            if [ "$lua_installed" = false ]; then
+                # Try generic lua package
+                if $PKG_INSTALL "lua5.4" 2>/dev/null || $PKG_INSTALL "lua" 2>/dev/null; then
+                    lua_installed=true
+                    LUA_VER="unknown"
+                fi
+            fi
+            ;;
+        dnf|yum)
+            if $PKG_INSTALL lua 2>/dev/null; then
+                lua_installed=true
+                LUA_VER="unknown"
+            fi
+            ;;
+        pacman)
+            if $PKG_INSTALL lua 2>/dev/null; then
+                lua_installed=true
+                LUA_VER="unknown"
+            fi
+            ;;
+    esac
+
+    if [ "$lua_installed" = false ]; then
+        warn "Could not install Lua automatically."
+        warn "Please install manually: sudo apt install lua5.4 (or 5.3/5.2/5.1)"
+    fi
+}
+
 # Install dependencies
 install_dependencies() {
     step "Installing dependencies..."
 
     if [ -z "$PKG_INSTALL" ]; then
         warn "Skipping automatic dependency installation."
-        warn "Please manually install: lua5.4, libsqlite3-dev, gcc, make"
+        warn "Please manually install: lua5.4 (or 5.3/5.2/5.1), libsqlite3-dev, gcc, make"
         return
     fi
 
@@ -165,29 +208,45 @@ install_dependencies() {
     info "Updating package lists..."
     eval "$PKG_UPDATE" 2>/dev/null || true
 
-    # Install core dependencies
+    # Install Lua (multi-version fallback)
+    install_lua
+
+    # Install other core dependencies
     case "$PKG_MANAGER" in
         apt)
-            $PKG_INSTALL lua5.4 liblua5.4-dev libsqlite3-dev gcc make 2>/dev/null || \
-            $PKG_INSTALL lua5.4 liblua5.4-0-dev libsqlite3-dev gcc make 2>/dev/null || \
+            # Install dev headers for the Lua version that was installed
+            if [ -n "$LUA_VER" ] && [ "$LUA_VER" != "unknown" ]; then
+                $PKG_INSTALL "liblua${LUA_VER}-dev" 2>/dev/null || \
+                $PKG_INSTALL "liblua${LUA_VER}.0-dev" 2>/dev/null || true
+            fi
+            $PKG_INSTALL libsqlite3-dev gcc make 2>/dev/null || \
             warn "Some packages may not be available. Check manually."
             ;;
         dnf|yum)
-            $PKG_INSTALL lua lua-devel sqlite-devel gcc make 2>/dev/null || \
+            $PKG_INSTALL lua-devel sqlite-devel gcc make 2>/dev/null || \
             warn "Some packages may not be available. Check manually."
             ;;
         pacman)
-            $PKG_INSTALL lua sqlite gcc make 2>/dev/null || \
+            $PKG_INSTALL sqlite gcc make 2>/dev/null || \
             warn "Some packages may not be available. Check manually."
             ;;
     esac
 
     # Verify critical tools
-    if command -v lua5.4 &>/dev/null || command -v lua &>/dev/null; then
-        local lua_ver=$(lua5.4 -v 2>/dev/null || lua -v 2>/dev/null || echo "unknown")
+    if command -v lua5.4 &>/dev/null || command -v lua5.3 &>/dev/null || \
+       command -v lua5.2 &>/dev/null || command -v lua5.1 &>/dev/null || \
+       command -v lua &>/dev/null || command -v luajit &>/dev/null; then
+        local lua_cmd=""
+        for c in lua5.4 lua5.3 lua5.2 lua5.1 lua luajit; do
+            if command -v "$c" &>/dev/null; then
+                lua_cmd="$c"
+                break
+            fi
+        done
+        local lua_ver=$($lua_cmd -v 2>&1 | head -1)
         info "Lua: $lua_ver"
     else
-        warn "Lua not found. LEM can still run with Lua fallback (no C modules)."
+        warn "Lua not found. LEM can still run with Lua fallback."
     fi
 
     if command -v gcc &>/dev/null; then
@@ -248,13 +307,15 @@ LUA_PATH="\$LEM_ROOT/src/?.lua;\$LEM_ROOT/src/?/init.lua;./src/?.lua;./src/?/ini
 
 # Find Lua interpreter
 LUA=""
-if command -v lua5.4 &>/dev/null; then
-    LUA="lua5.4"
-elif command -v lua &>/dev/null; then
-    LUA="lua"
-else
+for c in lua5.4 lua5.3 lua5.2 lua5.1 lua luajit; do
+    if command -v "$c" &>/dev/null; then
+        LUA="$c"
+        break
+    fi
+done
+if [ -z "$LUA" ]; then
     echo "Error: Lua interpreter not found."
-    echo "Install with: sudo apt install lua5.4"
+    echo "Install with: sudo apt install lua5.4 (or 5.3/5.2/5.1)"
     exit 1
 fi
 
@@ -284,16 +345,25 @@ compile_native() {
         return
     fi
 
-    # Check for Lua headers
+    # Check for Lua headers (try multiple versions)
     local LUA_INC=""
-    if pkg-config --exists lua5.4 2>/dev/null; then
-        LUA_INC=$(pkg-config --cflags lua5.4)
-    elif pkg-config --exists lua 2>/dev/null; then
-        LUA_INC=$(pkg-config --cflags lua)
-    elif [ -d "/usr/include/lua5.4" ]; then
-        LUA_INC="-I/usr/include/lua5.4"
-    elif [ -d "/usr/include/lua" ]; then
-        LUA_INC="-I/usr/include/lua"
+    for ver in 5.4 5.3 5.2 5.1; do
+        if pkg-config --exists "lua${ver}" 2>/dev/null; then
+            LUA_INC=$(pkg-config --cflags "lua${ver}")
+            break
+        fi
+    done
+
+    if [ -z "$LUA_INC" ]; then
+        if pkg-config --exists lua 2>/dev/null; then
+            LUA_INC=$(pkg-config --cflags lua)
+        elif [ -d "/usr/include/lua5.4" ]; then
+            LUA_INC="-I/usr/include/lua5.4"
+        elif [ -d "/usr/include/lua5.3" ]; then
+            LUA_INC="-I/usr/include/lua5.3"
+        elif [ -d "/usr/include/lua" ]; then
+            LUA_INC="-I/usr/include/lua"
+        fi
     fi
 
     if [ -n "$LUA_INC" ]; then
@@ -307,7 +377,7 @@ compile_native() {
         cd - >/dev/null
     else
         warn "Lua development headers not found."
-        warn "Install with: sudo apt install liblua5.4-dev"
+        warn "Install with: sudo apt install liblua5.4-dev (or liblua5.3-dev / liblua5.2-dev / liblua5.1-dev)"
         warn "LEM will use Lua fallback implementations."
     fi
 }
@@ -411,11 +481,13 @@ run_tests() {
 
     # Find Lua interpreter
     local LUA=""
-    if command -v lua5.4 &>/dev/null; then
-        LUA="lua5.4"
-    elif command -v lua &>/dev/null; then
-        LUA="lua"
-    else
+    for c in lua5.4 lua5.3 lua5.2 lua5.1 lua luajit; do
+        if command -v "$c" &>/dev/null; then
+            LUA="$c"
+            break
+        fi
+    done
+    if [ -z "$LUA" ]; then
         warn "Lua interpreter not found. Skipping tests."
         return
     fi
@@ -452,11 +524,12 @@ record_deps() {
     export PATH="$LEM_BIN_DIR:$PATH"
     
     local LUA=""
-    if command -v lua5.4 &>/dev/null; then
-        LUA="lua5.4"
-    elif command -v lua &>/dev/null; then
-        LUA="lua"
-    fi
+    for c in lua5.4 lua5.3 lua5.2 lua5.1 lua luajit; do
+        if command -v "$c" &>/dev/null; then
+            LUA="$c"
+            break
+        fi
+    done
     
     if [ -n "$LUA" ]; then
         $LUA -e "
@@ -466,7 +539,7 @@ record_deps() {
             local FS = require('core.fs')
             local data_dir = FS.expand_path('~/.local/share/lem')
             DB.init(data_dir)
-            local deps = {'lua5.4', 'libsqlite3-dev', 'gcc', 'make', 'sqlite3'}
+            local deps = {'lua', 'libsqlite3-dev', 'gcc', 'make', 'sqlite3'}
             for _, name in ipairs(deps) do
                 DB.add_package({name='lem-dep:'..name, manager='lem-internal', version='system'})
             end
@@ -491,8 +564,18 @@ print_summary() {
 
     # Show component status
     echo "Component status:"
-    if command -v lua5.4 &>/dev/null || command -v lua &>/dev/null; then
-        echo -e "  Lua:        ${GREEN}OK${NC}"
+    if command -v lua5.4 &>/dev/null || command -v lua5.3 &>/dev/null || \
+       command -v lua5.2 &>/dev/null || command -v lua5.1 &>/dev/null || \
+       command -v lua &>/dev/null || command -v luajit &>/dev/null; then
+        local lua_cmd=""
+        for c in lua5.4 lua5.3 lua5.2 lua5.1 lua luajit; do
+            if command -v "$c" &>/dev/null; then
+                lua_cmd="$c"
+                break
+            fi
+        done
+        local lua_ver=$($lua_cmd -v 2>&1 | head -1)
+        echo -e "  Lua:        ${GREEN}OK${NC} ($lua_ver)"
     else
         echo -e "  Lua:        ${RED}NOT FOUND${NC}"
     fi

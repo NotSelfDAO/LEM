@@ -12,11 +12,11 @@ local M = {}
 ------------------------------------------------------------------------
 M.dependencies = {
     {
-        name = "lua5.4",
+        name = "lua",
         type = "required",
-        description = "Lua 5.4 interpreter (core runtime)",
-        check_cmd = "lua5.4 -v 2>/dev/null || lua -v 2>/dev/null",
-        install_hint = "sudo apt install lua5.4",
+        description = "Lua interpreter (5.1-5.4 or LuaJIT, core runtime)",
+        check_cmd = "lua5.4 -v 2>/dev/null || lua5.3 -v 2>/dev/null || lua5.2 -v 2>/dev/null || lua5.1 -v 2>/dev/null || lua -v 2>/dev/null || luajit -v 2>/dev/null",
+        install_hint = "sudo apt install lua5.4 (or lua5.3/lua5.2/lua5.1)",
         category = "runtime",
     },
     {
@@ -74,7 +74,7 @@ M.dependencies = {
 ------------------------------------------------------------------------
 
 -- Run a shell command and return success boolean.
--- Uses io.popen directly because dependency check commands (lua5.4, gcc,
+-- Uses io.popen directly because dependency check commands (lua, gcc,
 -- pkg-config, etc.) are NOT in the Executor whitelist.
 local function shell_check(cmd)
     local pipe = io.popen(cmd .. " 2>/dev/null")
